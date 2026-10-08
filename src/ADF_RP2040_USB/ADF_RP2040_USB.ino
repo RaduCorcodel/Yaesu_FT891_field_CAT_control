@@ -64,8 +64,8 @@ bool is_init = false;
 char cmd_key[][8] = { // The command we'll be sending and receiving from the radio
   "EX1601", //Set and Get SSB power in HF. Set "EX1601005;" Get "EX1601;"
   "EX1603", //Set and Get CW power in HF. Set "EX1603005;" Get "EX1603;"
-  "MS;",     //Meter select on the radio front panel. Set "MS02;" Get "MS;"
-  "BS;",     //Band select. Set "BS02;" Get N/A
+  "MS",     //Meter select on the radio front panel. Set "MS02;" Get "MS;"
+  // "BS;",     //Band select. Set "BS02;" Get N/A
   "BU0;",    //Band-up. Write only "BU0;"
   "BD0;"     //Band-down. Write only "BD0;"
 };
@@ -130,24 +130,7 @@ void DecodeSerialMessage(const char* identifier, char* msg, size_t* res) {
   }
 }
 
-// void DisplayPrintText(char* text, size_t x, size_t y){
-//   display.clearDisplay();
-//   display.setTextSize(1.5);
-//   display.setTextColor(SH110X_WHITE);
-//   display.setCursor(x, y);
-//   display.print(text);
-//   display.display();
-// }
-
 void DisplayUpdateUI(void){
-  // // Get updates from radio if we made any changes using the usual radio controls
-    // for (size_t i=0; i<2; ++i) {
-    //   HostSetMessage(strlen(cmd_key[i]), cmd_key[i]);
-    //   size_t n_bytes;
-    //   char inbound_msg[16];
-    //   HostGetMessage(&n_bytes, inbound_msg);
-    //   DecodeSerialMessage(cmd_key[i], inbound_msg, &cmd_val[i]);
-    // }
   display.clearDisplay();
   display.setTextSize(1.5);
   display.setTextColor(SH110X_WHITE);
@@ -170,11 +153,13 @@ bool OnUpdateEncoder(void){
       switch(e){
         case 0:
         case 1:
-          enc_positions[e] = min(100, max(5, new_enc_position)); //Clamp value
+          enc_positions[e] = min(100, max(5, new_enc_position)); //Clamp value or assign valid value
           break;
         case 2:
-        case 3:
-          enc_positions[e] = min(5, max(0, new_enc_position)); //Clamp value
+
+          break;
+        case 3: //No modifier
+          enc_positions[e] = new_enc_position;
           break;
       }
       if (enc_positions[e] != new_enc_position) { //We clamped the value, need to rewrite the internal state of the encoder
@@ -205,6 +190,30 @@ uint32_t Wheel(byte WheelPos) {
   }
   WheelPos -= 170;
   return seesaw_NeoPixel::Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+}
+
+void TestCmdSeq(size_t v) {
+  char buf[10];
+  sprintf(buf,"%s%03d;",cmd_key[v],cmd_val[v]); //Compose the command and send to radio
+  //Serial.print(buf);Serial.println(strlen(buf));
+  HostSetMessage(strlen(buf), buf);
+}
+
+// Request data from device to update the internal state of our controller
+//// We call this once when the controller starts and periodically while running
+void ReqDeviceUpdate(void) {
+  // Get updates from radio if we made any changes using the usual radio controls
+  for (size_t i=0; i<3; ++i) { // Only the first 3 controlls can be querried, the forth doesn't have a read command
+    char buf[10];
+    sprintf(buf,"%s;",cmd_key[i]);
+    HostSetMessage(strlen(buf), buf);
+    size_t n_bytes;
+    char inbound_msg[16];
+    HostGetMessage(&n_bytes, inbound_msg);
+    DecodeSerialMessage(buf, inbound_msg, &cmd_val[i]);
+    enc_positions[i] = cmd_val[i]; //Update the encoder pos variable (redundant variable, consider using getter and setter)
+    ss.setEncoderPosition(cmd_val[i],i); //Update the internal state of the encoder
+  }
 }
 
 
@@ -255,31 +264,25 @@ void setup() {
   ss.pinModeBulk(mask, INPUT_PULLUP);
   ss.setGPIOInterrupts(mask, 1);
 
-  // Double check the new firmware is loaded on the seesaw board
-  /// Comment-out in the release version of the code
-  version = ss.getVersion();
-  uint16_t product = version >> 16 & 0xFFFF;
-  uint16_t date = version & 0xFFFF;
-  uint8_t day = date >> 11 & 0x1F;
-  uint8_t month = date >> 7 & 0x0F;
-  uint8_t year =  date & 0x7F;
-  Serial.print("Seesaw found at 0x"); Serial.println(SEESAW_ADDR, 16);
-  Serial.println("==========================");
-  Serial.print("version code = 0x"); Serial.println(version, 16);
-  Serial.println("--------------------------");
-  Serial.print("product = "); Serial.println(product);
-  Serial.print("year = "); Serial.println(year);
-  Serial.print("month = "); Serial.println(month);
-  Serial.print("day = "); Serial.println(day);
-  Serial.println("==========================");
-}
+  // // Double check the new firmware is loaded on the seesaw board
+  // /// Comment-out in the release version of the code
+  // version = ss.getVersion();
+  // uint16_t product = version >> 16 & 0xFFFF;
+  // uint16_t date = version & 0xFFFF;
+  // uint8_t day = date >> 11 & 0x1F;
+  // uint8_t month = date >> 7 & 0x0F;
+  // uint8_t year =  date & 0x7F;
+  // Serial.print("Seesaw found at 0x"); Serial.println(SEESAW_ADDR, 16);
+  // Serial.println("==========================");
+  // Serial.print("version code = 0x"); Serial.println(version, 16);
+  // Serial.println("--------------------------");
+  // Serial.print("product = "); Serial.println(product);
+  // Serial.print("year = "); Serial.println(year);
+  // Serial.print("month = "); Serial.println(month);
+  // Serial.print("day = "); Serial.println(day);
+  // Serial.println("==========================");
 
-void TestCmdSeq(size_t v) {
-  char buf[10];
-  // memcpy(buf,cmd_key[v], 6); //Copy a 6 character substring from position 0 
-  sprintf(buf,"%s%03d;",cmd_key[v],cmd_val[v]);
-  //erial.print(buf);Serial.println(strlen(buf));
-  HostSetMessage(strlen(buf), buf);
+  ReqDeviceUpdate();
 }
 
 void loop() {
@@ -354,251 +357,3 @@ void tuh_cdc_umount_cb(uint8_t idx) {
 }
 
 }
-    size_t count = SerialHost.read(buf, sizeof(buf));
-    *n = count;
-    for (size_t i=0; i<count ; i++) {
-      msg[i] = buf[i];
-    }
-    Serial.print("Received message: "); Serial.println((char*)buf);
-    if (!is_init) {is_init=true;}
-  }
-} 
-
-void HostSetMessage(byte msg_sz, const char* msg) {
-  if (SerialHost && SerialHost.connected()) {
-    SerialHost.write(msg, msg_sz);
-    SerialHost.flush();
-    delay(25); //30 Wait for the radio to compute the response and send back
-    Serial.print("Sent message: "); Serial.println(msg);
-  }
-}
-
-void DecodeSerialMessage(const char* identifier, char* msg, size_t* res) {
-  if (strncmp(identifier, msg, 6) == 0) { //We compare the command string with the received. The root (6 characters) should match
-    char c_res[5];
-    memcpy(c_res,&msg[6], 3); //Copy a 3 character substring from position 6 
-    *res = atoi(c_res); //Convert character array to numeric value
-    //Serial.print(c_res);Serial.println("~");
-  }
-}
-
-void DisplayPrintText(char* text, size_t x, size_t y){
-  display.clearDisplay();
-  display.setTextSize(1.5);
-  display.setTextColor(SH110X_WHITE);
-  display.setCursor(x, y);
-  display.print(text);
-  display.display();
-}
-
-#if defined(ARDUINO_ARCH_RP2040)
-//--------------------------------------------------------------------+
-// For RP2040 use both core0 for device stack, core1 for host stack
-//--------------------------------------------------------------------+
-
-//------------- Core0 -------------//
-void setup() {
-  Serial.begin(115200);
-  while ( !Serial ) delay(10);   // wait for native usb
-  Serial.println("TinyUSB Host Serial Echo Example");
-
-  // Start OLED
-  display.begin(0, true); // we dont use the i2c address but we will reset!
-  display.display();
-  delay(100);
-  display.clearDisplay();
-  // display.drawPixel(10, 10, SH110X_WHITE);
-  // display.display();
-  // delay(2000);
-  // display.clearDisplay();
-  // display.setTextSize(1.5);
-  // display.setTextColor(SH110X_WHITE);
-  // display.setCursor(0, 0);
-  // display.print("SSB Power");
-  // display.display();
-}
-
-void loop() {
-  if(!is_init) {
-    //Send message
-    char const c_msg[8] = "EX1601;";
-    //char* msg = cmd[1];
-    HostSetMessage(7, cmd[1]); //c_msg
-    //Receive message
-    size_t n_bytes;
-    char inbound_msg[16];
-    HostGetMessage(&n_bytes,inbound_msg);
-    // Process message
-    size_t n_res;
-    DecodeSerialMessage(cmd[1], inbound_msg, &n_res); //c_msg
-    // Update display
-    char display_text[16];
-    sprintf(display_text, "SSB Power %dW", n_res);
-    DisplayPrintText(display_text, 0, 0);
-  }
-  forward_serial();
-}
-
-//------------- Core1 -------------//
-void setup1() {
-  // configure pio-usb: defined in usbh_helper.h
-  rp2040_configure_pio_usb();
-
-  // run host stack on controller (rhport) 1
-  // Note: For rp2040 pico-pio-usb, calling USBHost.begin() on core1 will have most of the
-  // host bit-banging processing works done in core1 to free up core0 for other works
-  USBHost.begin(1);
-
-  // Initialize SerialHost
-  SerialHost.begin(9600);
-}
-
-void loop1() {
-  USBHost.task();
-}
-
-#else
-  throw std::invalid_argument("Code designed only for the Adafruit RP2040-USB-host");
-#endif
-
-//--------------------------------------------------------------------+
-// TinyUSB Host callbacks
-//--------------------------------------------------------------------+
-extern "C" {
-
-// Invoked when a device with CDC interface is mounted
-// idx is index of cdc interface in the internal pool.
-void tuh_cdc_mount_cb(uint8_t idx) {
-  // bind SerialHost object to this interface index
-  SerialHost.mount(idx);
-  Serial.println("SerialHost is connected to a new CDC device");
-}
-
-// Invoked when a device with CDC interface is unmounted
-void tuh_cdc_umount_cb(uint8_t idx) {
-  SerialHost.umount(idx);
-  Serial.println("SerialHost is disconnected");
-}
-
-}
-    if (!is_init) {is_init=true;}
-  }
-} 
-
-void HostSetMessage(byte msg_sz, const char* msg) {
-  if (SerialHost && SerialHost.connected()) {
-    SerialHost.write(msg, msg_sz);
-    SerialHost.flush();
-    delay(25); //30 Wait for the radio to compute the response and send back
-    Serial.print("Sent message: "); Serial.println(msg);
-  }
-}
-
-void DecodeSerialMessage(const char* identifier, char* msg, size_t* res) {
-  if (strncmp(identifier, msg, 6) == 0) { //We compare the command string with the received. The root (6 characters) should match
-    char c_res[5];
-    memcpy(c_res,&msg[6], 3); //Copy a 3 character substring from position 6 
-    *res = atoi(c_res); //Convert character array to numeric value
-    //Serial.print(c_res);Serial.println("~");
-  }
-}
-
-void DisplayPrintText(char* text){
-  display.clearDisplay();
-  display.setTextSize(1.5);
-  display.setTextColor(SH110X_WHITE);
-  display.setCursor(0, 0);
-  display.print(text);
-  display.display();
-}
-
-#if defined(ARDUINO_ARCH_RP2040)
-//--------------------------------------------------------------------+
-// For RP2040 use both core0 for device stack, core1 for host stack
-//--------------------------------------------------------------------+
-
-//------------- Core0 -------------//
-void setup() {
-  Serial.begin(115200);
-  while ( !Serial ) delay(10);   // wait for native usb
-  Serial.println("TinyUSB Host Serial Echo Example");
-
-  // Start OLED
-  display.begin(0, true); // we dont use the i2c address but we will reset!
-  display.display();
-  delay(100);
-  display.clearDisplay();
-  // display.drawPixel(10, 10, SH110X_WHITE);
-  // display.display();
-  // delay(2000);
-  // display.clearDisplay();
-  // display.setTextSize(1.5);
-  // display.setTextColor(SH110X_WHITE);
-  // display.setCursor(0, 0);
-  // display.print("SSB Power");
-  // display.display();
-}
-
-void loop() {
-  if(!is_init) {
-    //Send message
-    char const c_msg[8] = "EX1601;";
-    HostSetMessage(7, c_msg);
-    //Receive message
-    size_t n_bytes;
-    char inbound_msg[16];
-    HostGetMessage(&n_bytes,inbound_msg);
-    // Process message
-    size_t n_res;
-    DecodeSerialMessage(c_msg, inbound_msg, &n_res);
-    // Update display
-    char display_text[16];
-    sprintf(display_text, "SSB Power %dW",n_res);
-    DisplayPrintText(display_text);
-  }
-  forward_serial();
-}
-
-//------------- Core1 -------------//
-void setup1() {
-  // configure pio-usb: defined in usbh_helper.h
-  rp2040_configure_pio_usb();
-
-  // run host stack on controller (rhport) 1
-  // Note: For rp2040 pico-pio-usb, calling USBHost.begin() on core1 will have most of the
-  // host bit-banging processing works done in core1 to free up core0 for other works
-  USBHost.begin(1);
-
-  // Initialize SerialHost
-  SerialHost.begin(9600);
-}
-
-void loop1() {
-  USBHost.task();
-}
-
-#else
-  throw std::invalid_argument("Code designed only for the Adafruit RP2040-USB-host");
-#endif
-
-//--------------------------------------------------------------------+
-// TinyUSB Host callbacks
-//--------------------------------------------------------------------+
-extern "C" {
-
-// Invoked when a device with CDC interface is mounted
-// idx is index of cdc interface in the internal pool.
-void tuh_cdc_mount_cb(uint8_t idx) {
-  // bind SerialHost object to this interface index
-  SerialHost.mount(idx);
-  Serial.println("SerialHost is connected to a new CDC device");
-}
-
-// Invoked when a device with CDC interface is unmounted
-void tuh_cdc_umount_cb(uint8_t idx) {
-  SerialHost.umount(idx);
-  Serial.println("SerialHost is disconnected");
-}
-
-}
-
