@@ -7,3 +7,6 @@ Hit accept to install the dependent libraries too.
 * Adafruit Pico PIO USB Library https://github.com/sekigon-gonnoc/Pico-PIO-USB
 * Adafruit SH110X Driver Library https://github.com/adafruit/Adafruit_SH110X
 * Adafruit Seesaw Library https://github.com/adafruit/Adafruit_Seesaw
+
+## Bitmaps and other display symbols
+https://github.com/STEMpedia/eviveProjects/blob/master/imageToFlashMemoryIconsForTFT/tftIcons/tftIcons.ino
