@@ -32,6 +32,8 @@ This program only works on the Adafruit RP2040-USB-host (built-in USB Type-A hos
 // I2C Rotary encoder breakout
 #include "Adafruit_seesaw.h"
 #include <seesaw_neopixel.h>
+// Project includes
+#include "icons.h"
 
 // CDC Host object
 Adafruit_USBH_CDC SerialHost;
@@ -76,6 +78,7 @@ size_t cmd_val[4] = { //The responses we're expecting from the radio
 unsigned long curr_millis = 0; //We track the time in the main loop without blocking it. We use this for poling the radio
 unsigned long prev_millis = 0;
 unsigned int  poling_interval = 1000;
+bool pc_connected = false;
 
 // forward Seral <-> SerialHost
 void forward_serial(void) {
@@ -136,11 +139,18 @@ void DisplayUpdateUI(void){
   display.setTextColor(SH110X_WHITE);
   char display_text[16];
   sprintf(display_text, "SSB POWER %3.dW", cmd_val[0]);
-  display.setCursor(0, 0);
+  display.setCursor(0, 26);
   display.print(display_text);
   sprintf(display_text, "CW POWER  %3.dW", cmd_val[1]);
-  display.setCursor(0, 15);
+  display.setCursor(0, 41);
   display.print(display_text);
+  if(Serial){
+    //display.setCursor(0, 0);
+    display.drawBitmap(0,0,icon_pc,18,18,SH110X_WHITE);
+  }
+  if (1) { //SerialHost && SerialHost.connected()
+    display.drawBitmap(26,0,icon_radio,18,18,SH110X_WHITE);
+  }
   display.display();
 }
 
@@ -225,21 +235,36 @@ void ReqDeviceUpdate(void) {
 //------------- Core0 -------------//
 void setup() {
   Serial.begin(115200);
-  while ( !Serial ) delay(10);   // wait for native usb
-  Serial.println("TinyUSB Host Serial Echo Example");
+  int native_usb_timeout = 1000;
+  prev_millis = millis();
+  while ( !Serial ) {
+    delay(10);   // wait for native usb
+    curr_millis = millis();
+    if(curr_millis - prev_millis >= native_usb_timeout) {
+      break;
+    }
+  }
+  if(Serial){
+    Serial.println("Yaesu-891 CAT control starting");
+    pc_connected = true;
+  }
+  
 
   // Start OLED
   display.begin(0, true); // we dont use the i2c address but we will reset!
   display.display();
   delay(100);
   display.clearDisplay();
+  if(Serial){
+    Serial.println("Started SPI display");
+    pc_connected = true;
+  }
 
   // Start the I2C rotary encoder breakout board (it has its own Atiny85)
   if (! ss.begin(SEESAW_ADDR) || !ss_pixels.begin(SEESAW_ADDR)) {
     Serial.println("Couldn't find seesaw on default address");
     while(1) delay(10);
   }
-  Serial.println("Seesaw started!");
   uint32_t version = ((ss.getVersion() >> 16) & 0xFFFF);
   if (version  != 5752){
     Serial.print("Wrong firmware loaded? "); Serial.println(version);
@@ -258,12 +283,10 @@ void setup() {
   }
   ss_pixels.setBrightness(255);
   ss_pixels.show(); // Initialize all pixels to 'off'
-  Serial.println("Finished with the rotary encoder startup");
   pinMode(FTH_INT_PIN, INPUT_PULLUP);
   uint32_t mask = ((uint32_t)0b1 << SS_INT_PIN);
   ss.pinModeBulk(mask, INPUT_PULLUP);
   ss.setGPIOInterrupts(mask, 1);
-
   // // Double check the new firmware is loaded on the seesaw board
   // /// Comment-out in the release version of the code
   // version = ss.getVersion();
@@ -281,8 +304,16 @@ void setup() {
   // Serial.print("month = "); Serial.println(month);
   // Serial.print("day = "); Serial.println(day);
   // Serial.println("==========================");
+  if(Serial){
+    Serial.println("Started rotary encoder board");
+    pc_connected = true;
+  }
 
   ReqDeviceUpdate();
+  if(Serial){
+    Serial.println("Ready");
+    pc_connected = true;
+  }
 }
 
 void loop() {
