@@ -8,5 +8,15 @@ Hit accept to install the dependent libraries too.
 * Adafruit SH110X Driver Library https://github.com/adafruit/Adafruit_SH110X
 * Adafruit Seesaw Library https://github.com/adafruit/Adafruit_Seesaw
 
+## How to flash: Settings in the Arduino IDE
+Everything default except
+* Board: Adafruit Feather RP2040 USB Host
+* CPU Speed: 240MHz (Overclock)
+* Optimize: Optimize (-O)
+* USB Stack: Adafruit TinyUSB
+
+
 ## Bitmaps and other display symbols
 https://github.com/STEMpedia/eviveProjects/blob/master/imageToFlashMemoryIconsForTFT/tftIcons/tftIcons.ino
+https://icons8.com/icons/set/computer
+https://mischianti.org/images-to-byte-array-online-converter-cpp-arduino/#google_vignette
