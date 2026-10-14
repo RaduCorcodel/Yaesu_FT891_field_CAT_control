@@ -66,9 +66,9 @@ char cmd_key[][8] = { // The command we'll be sending and receiving from the rad
   "EX1601", //Set and Get SSB power in HF. Set "EX1601005;" Get "EX1601;"
   "EX1603", //Set and Get CW power in HF. Set "EX1603005;" Get "EX1603;"
   "MS",     //Meter select on the radio front panel. Set "MS02;" Get "MS;"
-  // "BS;",     //Band select. Set "BS02;" Get N/A
   "BU0",    //Band-up. Write only "BU0;"
   "BD0"     //Band-down. Write only "BD0;"
+    // "BS;",     //Band select. Set "BS02;" Get N/A
 };
 char cmd_send[][16] = {
   "",
@@ -146,7 +146,7 @@ void DecodeSerialMessage(const char* identifier, char* msg, size_t c_len, size_t
       c_res[c] = msg[c+strlen(identifier)-1];
     }
     *res = atoi(c_res); //Convert character array to numeric value
-    Serial.print(msg);Serial.print("~");Serial.print(c_res);Serial.println("~");
+    //Serial.print(msg);Serial.print("~");Serial.print(c_res);Serial.println("~");
   }
 }
 
@@ -187,7 +187,13 @@ bool OnUpdateEncoder(void){
           enc_positions[e] = min(4, max(0, new_enc_position));
           sprintf(cmd_send[e],"%s%01d;",cmd_key[e],enc_positions[e]); //Compose the command here to send to radio
           break;
-        case 3: //No modifier
+        case 3: //No modifier but compare if we want to go band up or down
+          if(enc_positions[e] < new_enc_position) {
+            sprintf(cmd_send[e],"%s;",cmd_key[e]);
+          }
+          else {
+            sprintf(cmd_send[e],"%s;",cmd_key[e+1]);
+          }
           enc_positions[e] = new_enc_position;
           break;
       }
@@ -351,7 +357,7 @@ void loop() {
   // if(!digitalRead(FTH_INT_PIN)){
     //bool update_radio = OnUpdateEncoder();
     if(OnUpdateEncoder()) {
-      for(int e=0; e<3; ++e) {
+      for(int e=0; e<4; ++e) {
         if(cmd_val[e] != enc_positions[e]) {
           // ToDO: this is a very clunky way of storing the state. We have the state of the radio, the state of the microcontroller and the state on the seesaw, and they all need to be sync'ed
           //      we need to merge all in one variable
