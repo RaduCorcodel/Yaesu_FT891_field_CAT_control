@@ -62,23 +62,35 @@ int32_t enc_positions[4] = {5, 5, 0, 0};
 #define FTH_INT_PIN 10 //Interrupt pin on the Feather. SS_INT_PIN and FTH_INT_PIN are connected by a wire
 
 // Globals
-bool is_init = false;
 char cmd_key[][8] = { // The command we'll be sending and receiving from the radio
   "EX1601", //Set and Get SSB power in HF. Set "EX1601005;" Get "EX1601;"
   "EX1603", //Set and Get CW power in HF. Set "EX1603005;" Get "EX1603;"
   "MS",     //Meter select on the radio front panel. Set "MS02;" Get "MS;"
   // "BS;",     //Band select. Set "BS02;" Get N/A
-  "BU0;",    //Band-up. Write only "BU0;"
-  "BD0;"     //Band-down. Write only "BD0;"
+  "BU0",    //Band-up. Write only "BU0;"
+  "BD0"     //Band-down. Write only "BD0;"
+};
+char cmd_send[][16] = {
+  "",
+  "",
+  "",
+  ""
+};
+size_t cmd_len[4] = { //The length of the argument we expect from the radio for each command
+  3, //e.g. "EX1601005;"
+  3, //e.g. "EX1603005;"
+  1, //e.g. "MS2;"
+  1
 };
 size_t cmd_val[4] = { //The responses we're expecting from the radio
   0,        // SSB power
-  0         // CW power (also the power the tuner will use)
+  0,        // CW power (also the power the tuner will use)
+  0,        // Meter ID (0=CMP, 1=ALC, 2=PO, 3=SWR, 4=IDD)
+  0
 }; 
 unsigned long curr_millis = 0; //We track the time in the main loop without blocking it. We use this for poling the radio
 unsigned long prev_millis = 0;
 unsigned int  poling_interval = 1000;
-bool pc_connected = false;
 
 // forward Seral <-> SerialHost
 void forward_serial(void) {
@@ -110,7 +122,7 @@ void HostGetMessage(size_t *n, char* msg) {
       msg[i] = buf[i];
     }
     Serial.print("Received message: "); Serial.println((char*)buf);
-    //if (!is_init) {is_init=true;}
+    Serial.flush();
   }
 } 
 
@@ -118,18 +130,23 @@ void HostSetMessage(byte msg_sz, const char* msg) {
   if (SerialHost && SerialHost.connected()) {
     SerialHost.write(msg, msg_sz);
     SerialHost.flush();
-    delay(25); //30 Wait for the radio to compute the response and send back
+    delay(50); //30 Wait for the radio to compute the response and send back
     Serial.print("Sent message: "); Serial.println(msg);
   }
 }
 
 //ToD0: replace hard coded numbers
-void DecodeSerialMessage(const char* identifier, char* msg, size_t* res) {
-  if (strncmp(identifier, msg, 6) == 0) { //We compare the command string with the received. The root (6 characters) should match
-    char c_res[5];
-    memcpy(c_res,&msg[6], 3); //Copy a 3 character substring from position 6 
+void DecodeSerialMessage(const char* identifier, char* msg, size_t c_len, size_t* res) {
+  // Serial.print("Characters to match "); Serial.println(strlen(identifier)-1);
+  char c_res[32];
+  if (strncmp(identifier, msg, strlen(identifier)-1) == 0) { //We compare the command string with the received. The root (6 characters) should match
+    //This memcpy just doesn't get compiled well on the Arduino so we copy the bytes manually
+    // memcpy(c_res,&msg[strlen(identifier)-1], 3); //Eg: "EX1601011;" Copy a 3 character substring from position 6 
+    for(size_t c=0; c<c_len; ++c) {
+      c_res[c] = msg[c+strlen(identifier)-1];
+    }
     *res = atoi(c_res); //Convert character array to numeric value
-    //Serial.print(c_res);Serial.println("~");
+    Serial.print(msg);Serial.print("~");Serial.print(c_res);Serial.println("~");
   }
 }
 
@@ -148,7 +165,7 @@ void DisplayUpdateUI(void){
     //display.setCursor(0, 0);
     display.drawBitmap(0,0,icon_pc,18,18,SH110X_WHITE);
   }
-  if (1) { //SerialHost && SerialHost.connected()
+  if (SerialHost && SerialHost.connected()) { //SerialHost && SerialHost.connected()
     display.drawBitmap(26,0,icon_radio,18,18,SH110X_WHITE);
   }
   display.display();
@@ -164,15 +181,17 @@ bool OnUpdateEncoder(void){
         case 0:
         case 1:
           enc_positions[e] = min(100, max(5, new_enc_position)); //Clamp value or assign valid value
+          sprintf(cmd_send[e],"%s%03d;",cmd_key[e],enc_positions[e]); //Compose the command here to send to radio
           break;
         case 2:
-
+          enc_positions[e] = min(4, max(0, new_enc_position));
+          sprintf(cmd_send[e],"%s%01d;",cmd_key[e],enc_positions[e]); //Compose the command here to send to radio
           break;
         case 3: //No modifier
           enc_positions[e] = new_enc_position;
           break;
       }
-      if (enc_positions[e] != new_enc_position) { //We clamped the value, need to rewrite the internal state of the encoder
+      if (enc_positions[e] != new_enc_position) { //We clamped the value, need to rewrite the internal state of the encoder on the Seesaw
         ss.setEncoderPosition(enc_positions[e],e);
       }
       else { //New encoder value is valid so send a message to the radio to update
@@ -180,6 +199,7 @@ bool OnUpdateEncoder(void){
         char buf[16];
         sprintf(buf, "New encoder vals: %d %d %d %d", enc_positions[0], enc_positions[1], enc_positions[2], enc_positions[3]);
         Serial.println(buf);
+        Serial.print("Will send: ");Serial.print(cmd_send[e]);Serial.println("~");
       }
       // change the neopixel color, mulitply the new positiion by 4 to speed it up
       ss_pixels.setPixelColor(e, Wheel((new_enc_position*4) & 0xFF));
@@ -220,7 +240,7 @@ void ReqDeviceUpdate(void) {
     size_t n_bytes;
     char inbound_msg[16];
     HostGetMessage(&n_bytes, inbound_msg);
-    DecodeSerialMessage(buf, inbound_msg, &cmd_val[i]);
+    DecodeSerialMessage(buf, inbound_msg, cmd_len[i], &cmd_val[i]);
     enc_positions[i] = cmd_val[i]; //Update the encoder pos variable (redundant variable, consider using getter and setter)
     ss.setEncoderPosition(cmd_val[i],i); //Update the internal state of the encoder
   }
@@ -245,8 +265,8 @@ void setup() {
     }
   }
   if(Serial){
+    Serial.println("------------------------------");
     Serial.println("Yaesu-891 CAT control starting");
-    pc_connected = true;
   }
   
 
@@ -257,7 +277,6 @@ void setup() {
   display.clearDisplay();
   if(Serial){
     Serial.println("Started SPI display");
-    pc_connected = true;
   }
 
   // Start the I2C rotary encoder breakout board (it has its own Atiny85)
@@ -306,13 +325,11 @@ void setup() {
   // Serial.println("==========================");
   if(Serial){
     Serial.println("Started rotary encoder board");
-    pc_connected = true;
   }
 
   ReqDeviceUpdate();
   if(Serial){
     Serial.println("Ready");
-    pc_connected = true;
   }
 }
 
@@ -330,17 +347,21 @@ void loop() {
 
   // Weird way of using interrupts but that's the price we pay for using a ready-made breakout board
   //// Read the encoders from the I2C only if we observed an interrupt (so no polling the I2C bus, save on compute)
-  if(!digitalRead(FTH_INT_PIN)){
-    bool update_radio = OnUpdateEncoder();
-    if(update_radio) {
-      for(size_t e=0; e<2; ++e) {
+  //// Well... the interrupt doesn't work at all, it's triggering all the time. We will fix later, and now just poll the I2C line at every iteration
+  // if(!digitalRead(FTH_INT_PIN)){
+    //bool update_radio = OnUpdateEncoder();
+    if(OnUpdateEncoder()) {
+      for(int e=0; e<3; ++e) {
         if(cmd_val[e] != enc_positions[e]) {
+          // ToDO: this is a very clunky way of storing the state. We have the state of the radio, the state of the microcontroller and the state on the seesaw, and they all need to be sync'ed
+          //      we need to merge all in one variable
           cmd_val[e] = enc_positions[e]; //Sync the radio commanded values to the desired values from encoders
-          TestCmdSeq(e);
+          // ToDo: the way it works now, every time we touch one encoder, we send messages for all encoders. This is too superfluos and should only send the msg that is different
+          HostSetMessage(strlen(cmd_send[e]), cmd_send[e]);
         }
       }
     }
-  }
+  // }
 
   // Also pass-through commands from the computer serial monitor to the radio
   forward_serial();
