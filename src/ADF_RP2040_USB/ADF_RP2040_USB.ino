@@ -70,12 +70,13 @@ char cmd_key[][8] = { // The command we'll be sending and receiving from the rad
   "BD0"     //Band-down. Write only "BD0;"
     // "BS;",     //Band select. Set "BS02;" Get N/A
 };
-char cmd_send[][16] = {
-  "",
-  "",
-  "",
-  ""
-};
+// char cmd_send[][16] = {
+//   "",
+//   "",
+//   "",
+//   ""
+// };
+char cmd_send[16] = "";
 size_t cmd_len[4] = { //The length of the argument we expect from the radio for each command
   3, //e.g. "EX1601005;"
   3, //e.g. "EX1603005;"
@@ -181,18 +182,18 @@ bool OnUpdateEncoder(void){
         case 0:
         case 1:
           enc_positions[e] = min(100, max(5, new_enc_position)); //Clamp value or assign valid value
-          sprintf(cmd_send[e],"%s%03d;",cmd_key[e],enc_positions[e]); //Compose the command here to send to radio
+          sprintf(cmd_send,"%s%03d;",cmd_key[e],enc_positions[e]); //Compose the command here to send to radio
           break;
         case 2:
           enc_positions[e] = min(4, max(0, new_enc_position));
-          sprintf(cmd_send[e],"%s%01d;",cmd_key[e],enc_positions[e]); //Compose the command here to send to radio
+          sprintf(cmd_send,"%s%01d;",cmd_key[e],enc_positions[e]); //Compose the command here to send to radio
           break;
         case 3: //No modifier but compare if we want to go band up or down
           if(enc_positions[e] < new_enc_position) {
-            sprintf(cmd_send[e],"%s;",cmd_key[e]);
+            sprintf(cmd_send,"%s;",cmd_key[e]);
           }
           else {
-            sprintf(cmd_send[e],"%s;",cmd_key[e+1]);
+            sprintf(cmd_send,"%s;",cmd_key[e+1]);
           }
           enc_positions[e] = new_enc_position;
           break;
@@ -205,7 +206,7 @@ bool OnUpdateEncoder(void){
         char buf[16];
         sprintf(buf, "New encoder vals: %d %d %d %d", enc_positions[0], enc_positions[1], enc_positions[2], enc_positions[3]);
         Serial.println(buf);
-        Serial.print("Will send: ");Serial.print(cmd_send[e]);Serial.println("~");
+        Serial.print("Will send: ");Serial.print(cmd_send);Serial.println("~");
       }
       // change the neopixel color, mulitply the new positiion by 4 to speed it up
       ss_pixels.setPixelColor(e, Wheel((new_enc_position*4) & 0xFF));
@@ -362,10 +363,9 @@ void loop() {
           // ToDO: this is a very clunky way of storing the state. We have the state of the radio, the state of the microcontroller and the state on the seesaw, and they all need to be sync'ed
           //      we need to merge all in one variable
           cmd_val[e] = enc_positions[e]; //Sync the radio commanded values to the desired values from encoders
-          // ToDo: the way it works now, every time we touch one encoder, we send messages for all encoders. This is too superfluos and should only send the msg that is different
-          HostSetMessage(strlen(cmd_send[e]), cmd_send[e]);
         }
       }
+      HostSetMessage(strlen(cmd_send), cmd_send);
     }
   // }
 
