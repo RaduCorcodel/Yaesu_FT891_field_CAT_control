@@ -1,5 +1,6 @@
 /*********************************************************************
-Based on "Adafruit TinyUSB LibraryDualRole/CDC/serial_host_bridge.ino" example
+(c) 2026 Radu Corcodel, Brookline MA-02445
+Inspired from "Adafruit TinyUSB LibraryDualRole/CDC/serial_host_bridge.ino" example
 This program only works on the Adafruit RP2040-USB-host (built-in USB Type-A host)
 *********************************************************************/
 
@@ -35,7 +36,7 @@ This program only works on the Adafruit RP2040-USB-host (built-in USB Type-A hos
 // Project includes
 #include "icons.h"
 
-// CDC Host object
+// CDC USB Host object
 Adafruit_USBH_CDC SerialHost;
 
 // SPI Display object (SPI1 // SPI0)
@@ -49,15 +50,12 @@ Adafruit_USBH_CDC SerialHost;
 Adafruit_SH1106G display = Adafruit_SH1106G(H_RES, V_RES, OLED_MOSI, OLED_CLK, OLED_DC, OLED_RST, OLED_CS);
 
 // I2C rotary encoder breakout
-#define SS_NEO_PIN       18
 #define SS_ENC0_SWITCH   12
 #define SS_ENC1_SWITCH   14
 #define SS_ENC2_SWITCH   17
 #define SS_ENC3_SWITCH   9
 #define SEESAW_ADDR      0x49
 Adafruit_seesaw ss = Adafruit_seesaw(&Wire);
-seesaw_NeoPixel ss_pixels = seesaw_NeoPixel(4, SS_NEO_PIN, NEO_GRB + NEO_KHZ800);
-int32_t enc_positions[4] = {5, 5, 0, 0};
 #define SS_INT_PIN 3 //Interrupt pin on the Seesaw. SS_INT_PIN and FTH_INT_PIN are connected by a wire
 #define FTH_INT_PIN 10 //Interrupt pin on the Feather. SS_INT_PIN and FTH_INT_PIN are connected by a wire
 
@@ -70,12 +68,6 @@ char cmd_key[][8] = { // The command we'll be sending and receiving from the rad
   "BD0"     //Band-down. Write only "BD0;"
     // "BS;",     //Band select. Set "BS02;" Get N/A
 };
-// char cmd_send[][16] = {
-//   "",
-//   "",
-//   "",
-//   ""
-// };
 char cmd_send[16] = "";
 size_t cmd_len[4] = { //The length of the argument we expect from the radio for each command
   3, //e.g. "EX1601005;"
@@ -92,12 +84,13 @@ size_t cmd_val[4] = { //The responses we're expecting from the radio
 unsigned long curr_millis = 0; //We track the time in the main loop without blocking it. We use this for poling the radio
 unsigned long prev_millis = 0;
 unsigned int  poling_interval = 1000;
+int32_t enc_positions[4] = {5, 5, 0, 0};
 
-// forward Seral <-> SerialHost
+// forward messages PCSerial <-> SerialHost
 void forward_serial(void) {
   uint8_t buf[64];
 
-  // Serial -> SerialHost
+  // PCSerial -> SerialHost
   if (Serial.available()) {
     size_t count = Serial.read(buf, sizeof(buf));
     if (SerialHost && SerialHost.connected()) {
@@ -106,7 +99,7 @@ void forward_serial(void) {
     }
   }
 
-  // SerialHost -> Serial
+  // SerialHost -> PCSerial
   if (SerialHost.connected() && SerialHost.available()) {
     size_t count = SerialHost.read(buf, sizeof(buf));
     Serial.write(buf, count);
@@ -114,6 +107,7 @@ void forward_serial(void) {
   }
 }
 
+// Helper method for getting a message from the SerialHost
 void HostGetMessage(size_t *n, char* msg) {
   uint8_t buf[10];
   if (SerialHost.connected() && SerialHost.available()) {
@@ -127,6 +121,7 @@ void HostGetMessage(size_t *n, char* msg) {
   }
 } 
 
+// Helper method for sending a message to the SerialHost
 void HostSetMessage(byte msg_sz, const char* msg) {
   if (SerialHost && SerialHost.connected()) {
     SerialHost.write(msg, msg_sz);
@@ -136,11 +131,12 @@ void HostSetMessage(byte msg_sz, const char* msg) {
   }
 }
 
-//ToD0: replace hard coded numbers
+// Specialized method for decoding a message  oming from a Yaesu radio using CAT control
+// Messages come in the form "IDENxxx;" where IDEN is some command identifier, xxx is usually a numeric value (can be anywhere between 3 to 1 characters), and a mandatory semicolon to mark the end of the message
 void DecodeSerialMessage(const char* identifier, char* msg, size_t c_len, size_t* res) {
   // Serial.print("Characters to match "); Serial.println(strlen(identifier)-1);
   char c_res[32];
-  if (strncmp(identifier, msg, strlen(identifier)-1) == 0) { //We compare the command string with the received. The root (6 characters) should match
+  if (strncmp(identifier, msg, strlen(identifier)-1) == 0) { //We compare the command string with the received. The root should match
     //This memcpy just doesn't get compiled well on the Arduino so we copy the bytes manually
     // memcpy(c_res,&msg[strlen(identifier)-1], 3); //Eg: "EX1601011;" Copy a 3 character substring from position 6 
     for(size_t c=0; c<c_len; ++c) {
@@ -151,6 +147,8 @@ void DecodeSerialMessage(const char* identifier, char* msg, size_t c_len, size_t
   }
 }
 
+// Display methods
+// Update the OLED display with the new values
 void DisplayUpdateUI(void){
   display.clearDisplay();
   display.setTextSize(1.5);
@@ -162,16 +160,21 @@ void DisplayUpdateUI(void){
   sprintf(display_text, "CW POWER  %3.dW", cmd_val[1]);
   display.setCursor(0, 41);
   display.print(display_text);
+  // Draw the PC icon on the display if the computer is connected 
   if(Serial){
     //display.setCursor(0, 0);
     display.drawBitmap(0,0,icon_pc,18,18,SH110X_WHITE);
   }
+  // Draw the Radio icon if the radio is connected
   if (SerialHost && SerialHost.connected()) { //SerialHost && SerialHost.connected()
     display.drawBitmap(26,0,icon_radio,18,18,SH110X_WHITE);
   }
+  // Flush everything to the display
   display.display();
 }
 
+// Encoder methods:
+// Check if we have new encoder values we should pass to the radio
 bool OnUpdateEncoder(void){
   bool should_update = false;
   for (size_t e=0; e<4; e++) {
@@ -208,34 +211,12 @@ bool OnUpdateEncoder(void){
         Serial.println(buf);
         Serial.print("Will send: ");Serial.print(cmd_send);Serial.println("~");
       }
-      // change the neopixel color, mulitply the new positiion by 4 to speed it up
-      ss_pixels.setPixelColor(e, Wheel((new_enc_position*4) & 0xFF));
-      ss_pixels.show();
     }
   }
   return should_update;
 }
 
-uint32_t Wheel(byte WheelPos) {
-  WheelPos = 255 - WheelPos;
-  if (WheelPos < 85) {
-    return seesaw_NeoPixel::Color(255 - WheelPos * 3, 0, WheelPos * 3);
-  }
-  if (WheelPos < 170) {
-    WheelPos -= 85;
-    return seesaw_NeoPixel::Color(0, WheelPos * 3, 255 - WheelPos * 3);
-  }
-  WheelPos -= 170;
-  return seesaw_NeoPixel::Color(WheelPos * 3, 255 - WheelPos * 3, 0);
-}
-
-void TestCmdSeq(size_t v) {
-  char buf[10];
-  sprintf(buf,"%s%03d;",cmd_key[v],cmd_val[v]); //Compose the command and send to radio
-  //Serial.print(buf);Serial.println(strlen(buf));
-  HostSetMessage(strlen(buf), buf);
-}
-
+// Radio poling methods:
 // Request data from device to update the internal state of our controller
 //// We call this once when the controller starts and periodically while running
 void ReqDeviceUpdate(void) {
@@ -287,7 +268,7 @@ void setup() {
   }
 
   // Start the I2C rotary encoder breakout board (it has its own Atiny85)
-  if (! ss.begin(SEESAW_ADDR) || !ss_pixels.begin(SEESAW_ADDR)) {
+  if (! ss.begin(SEESAW_ADDR)) {
     Serial.println("Couldn't find seesaw on default address");
     while(1) delay(10);
   }
@@ -307,8 +288,6 @@ void setup() {
     ss.setEncoderPosition(enc_positions[e], e);
     ss.enableEncoderInterrupt(e);
   }
-  ss_pixels.setBrightness(255);
-  ss_pixels.show(); // Initialize all pixels to 'off'
   pinMode(FTH_INT_PIN, INPUT_PULLUP);
   uint32_t mask = ((uint32_t)0b1 << SS_INT_PIN);
   ss.pinModeBulk(mask, INPUT_PULLUP);
