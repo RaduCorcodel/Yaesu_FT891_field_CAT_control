@@ -75,16 +75,16 @@ size_t cmd_len[4] = { //The length of the argument we expect from the radio for 
   1, //e.g. "MS2;"
   1
 };
-size_t cmd_val[4] = { //The responses we're expecting from the radio
-  0,        // SSB power
-  0,        // CW power (also the power the tuner will use)
+size_t enc_positions[4] = { //The responses we're expecting from the radio
+  5,        // SSB power
+  5,        // CW power (also the power the tuner will use)
   0,        // Meter ID (0=CMP, 1=ALC, 2=PO, 3=SWR, 4=IDD)
   0
 }; 
 unsigned long curr_millis = 0; //We track the time in the main loop without blocking it. We use this for poling the radio
 unsigned long prev_millis = 0;
-unsigned int  poling_interval = 1000;
-int32_t enc_positions[4] = {5, 5, 0, 0};
+unsigned int  radio_poling_interval = 5000; //[ms]
+// unsigned int  radio_freq = 10;
 
 // forward messages PCSerial <-> SerialHost
 void forward_serial(void) {
@@ -109,7 +109,7 @@ void forward_serial(void) {
 
 // Helper method for getting a message from the SerialHost
 void HostGetMessage(size_t *n, char* msg) {
-  uint8_t buf[10];
+  uint8_t buf[16];
   if (SerialHost.connected() && SerialHost.available()) {
     size_t count = SerialHost.read(buf, sizeof(buf));
     *n = count;
@@ -143,32 +143,58 @@ void DecodeSerialMessage(const char* identifier, char* msg, size_t c_len, size_t
       c_res[c] = msg[c+strlen(identifier)-1];
     }
     *res = atoi(c_res); //Convert character array to numeric value
-    //Serial.print(msg);Serial.print("~");Serial.print(c_res);Serial.println("~");
+    Serial.print(msg);Serial.print("~");Serial.print(c_res);Serial.println("~");
   }
+}
+
+// Radio poling methods:
+// Request data from device to update the internal state of our controller
+//// We call this once when the controller starts and periodically while running
+void ReqDeviceUpdate(void) {
+  // Get updates from radio if we made any changes using the usual radio controls
+  char buf[10];
+  size_t n_bytes;
+  char inbound_msg[16];
+  for (size_t i=0; i<3; ++i) { // Only the first 3 controlls can be querried, the forth doesn't have a read command
+    sprintf(buf,"%s;",cmd_key[i]);
+    HostSetMessage(strlen(buf), buf);
+    HostGetMessage(&n_bytes, inbound_msg);
+    DecodeSerialMessage(buf, inbound_msg, cmd_len[i], &enc_positions[i]);
+    ss.setEncoderPosition(enc_positions[i],i); //Update the internal state of the encoder
+  }
+  // // Show the current frequency on the display why not?!
+  // char freq_msg[3] = "FA";
+  // sprintf(buf,"%s;",freq_msg);
+  // HostSetMessage(strlen(buf),buf);
+  // HostGetMessage(&n_bytes, inbound_msg);
+  // DecodeSerialMessage(freq_msg, inbound_msg, 9, &radio_freq);
 }
 
 // Display methods
 // Update the OLED display with the new values
-void DisplayUpdateUI(void){
+void DisplayUpdateUI(size_t *enc){
   display.clearDisplay();
   display.setTextSize(1.5);
   display.setTextColor(SH110X_WHITE);
-  char display_text[16];
-  sprintf(display_text, "SSB POWER %3.dW", cmd_val[0]);
-  display.setCursor(0, 26);
+  char display_text[32];
+  sprintf(display_text, "SSB POWER %3.dW", enc[0]);
+  display.setCursor(20, 26);
   display.print(display_text);
-  sprintf(display_text, "CW POWER  %3.dW", cmd_val[1]);
-  display.setCursor(0, 41);
+  sprintf(display_text, "CW POWER  %3.dW", enc[1]);
+  display.setCursor(20, 41);
   display.print(display_text);
+  // sprintf(display_text, "Freq  %d", radio_freq);
+  // display.setCursor(20, 56);
+  // display.print(display_text);
   // Draw the PC icon on the display if the computer is connected 
   if(Serial){
-    //display.setCursor(0, 0);
     display.drawBitmap(0,0,icon_pc,18,18,SH110X_WHITE);
   }
   // Draw the Radio icon if the radio is connected
   if (SerialHost && SerialHost.connected()) { //SerialHost && SerialHost.connected()
     display.drawBitmap(26,0,icon_radio,18,18,SH110X_WHITE);
   }
+
   // Flush everything to the display
   display.display();
 }
@@ -178,7 +204,7 @@ void DisplayUpdateUI(void){
 bool OnUpdateEncoder(void){
   bool should_update = false;
   for (size_t e=0; e<4; e++) {
-    int32_t new_enc_position = ss.getEncoderPosition(e);
+    size_t new_enc_position = ss.getEncoderPosition(e);
     // did we move around?
     if (enc_positions[e] != new_enc_position) {
       switch(e){
@@ -214,24 +240,6 @@ bool OnUpdateEncoder(void){
     }
   }
   return should_update;
-}
-
-// Radio poling methods:
-// Request data from device to update the internal state of our controller
-//// We call this once when the controller starts and periodically while running
-void ReqDeviceUpdate(void) {
-  // Get updates from radio if we made any changes using the usual radio controls
-  for (size_t i=0; i<3; ++i) { // Only the first 3 controlls can be querried, the forth doesn't have a read command
-    char buf[10];
-    sprintf(buf,"%s;",cmd_key[i]);
-    HostSetMessage(strlen(buf), buf);
-    size_t n_bytes;
-    char inbound_msg[16];
-    HostGetMessage(&n_bytes, inbound_msg);
-    DecodeSerialMessage(buf, inbound_msg, cmd_len[i], &cmd_val[i]);
-    enc_positions[i] = cmd_val[i]; //Update the encoder pos variable (redundant variable, consider using getter and setter)
-    ss.setEncoderPosition(cmd_val[i],i); //Update the internal state of the encoder
-  }
 }
 
 
@@ -321,15 +329,17 @@ void setup() {
 
 void loop() {
 
-  
-  // curr_millis = millis();
-  // if(curr_millis - prev_millis >= poling_interval) {
-  //   prev_millis = curr_millis;
-  //   DisplayUpdateUI();
-  // }
+  // From time to time, poll the radio to see if we didn't change anything using the radio instead of this control box
+  // Keep this commented out during development otherwise you have a bunch of unnecessary and annoying traffic to see of the serial port
+  curr_millis = millis();
+  if(curr_millis - prev_millis >= radio_poling_interval) {
+    prev_millis = curr_millis;
+    ReqDeviceUpdate();
+  }
 
   // Update the display
-  DisplayUpdateUI();
+  //ToDo: consider updating less often either with millis or event triggered
+  DisplayUpdateUI(enc_positions);
 
   // Weird way of using interrupts but that's the price we pay for using a ready-made breakout board
   //// Read the encoders from the I2C only if we observed an interrupt (so no polling the I2C bus, save on compute)
@@ -337,13 +347,6 @@ void loop() {
   // if(!digitalRead(FTH_INT_PIN)){
     //bool update_radio = OnUpdateEncoder();
     if(OnUpdateEncoder()) {
-      for(int e=0; e<4; ++e) {
-        if(cmd_val[e] != enc_positions[e]) {
-          // ToDO: this is a very clunky way of storing the state. We have the state of the radio, the state of the microcontroller and the state on the seesaw, and they all need to be sync'ed
-          //      we need to merge all in one variable
-          cmd_val[e] = enc_positions[e]; //Sync the radio commanded values to the desired values from encoders
-        }
-      }
       HostSetMessage(strlen(cmd_send), cmd_send);
     }
   // }
