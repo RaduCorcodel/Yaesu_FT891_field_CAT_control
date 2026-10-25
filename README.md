@@ -17,9 +17,9 @@ Everything default except
 
 
 ## Bitmaps and other display symbols
-https://github.com/STEMpedia/eviveProjects/blob/master/imageToFlashMemoryIconsForTFT/tftIcons/tftIcons.ino
-https://icons8.com/icons/set/computer
-https://mischianti.org/images-to-byte-array-online-converter-cpp-arduino/
+* https://github.com/STEMpedia/eviveProjects/blob/master/imageToFlashMemoryIconsForTFT/tftIcons/tftIcons.ino
+* https://icons8.com/icons/set/computer
+* https://mischianti.org/images-to-byte-array-online-converter-cpp-arduino/
 
 ## Known issue with the Adafruit Seesaw boards
 There is a firmware bug in the original firmware, as mentioned here: https://forums.adafruit.com/viewtopic.php?t=208698
