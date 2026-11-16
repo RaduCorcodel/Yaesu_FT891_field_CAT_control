@@ -37,3 +37,7 @@ But we can reprogram them ourselves:
 *   Chip: Atiny817
 *   Programmer: Serial UPDI - Slow: 57600 baud
 * Program the seesaw and verify with our code in the setup function. THere is a commented out bit of code that checks the correct firmware version and prints out the datecode of the FW
+
+## Yaesu FT-891 CAT control documentation
+List of all the CAT controls the radio accepts and transmits
+https://www.yaesu.com/Files/4CB893D7-1018-01AF-FA97E9E9AD48B50C/FT-891_CAT_OM_ENG_1909-C.pdf
